@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatSphere</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+          rel="stylesheet">
+
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.2.0/bundles/stomp.umd.min.js"></script>
+
+    <style>
+
+        :root{
+            --bg:#111b21;
+            --container:#0b141a;
+            --header:#202c33;
+            --chat:#0b141a;
+            --mine:#005c4b;
+            --other:#202c33;
+            --text:white;
+        }
+
+        body.light-mode{
+            --bg:#f5f5f5;
+            --container:white;
+            --header:#0d6efd;
+            --chat:#f8f9fa;
+            --mine:#d1e7dd;
+            --other:white;
+            --text:black;
+        }
+
+        body{
+            background:var(--bg);
+            height:100vh;
+            display:flex;
+            justify-content:center;
+            align-items:center;
+            transition:.3s;
+        }
+
+        .chat-container{
+            width:900px;
+            height:90vh;
+            background:var(--container);
+            border-radius:20px;
+            overflow:hidden;
+            display:flex;
+            flex-direction:column;
+            box-shadow:0 10px 30px rgba(0,0,0,.3);
+        }
+
+        .chat-header{
+            background:var(--header);
+            color:white;
+            padding:15px 20px;
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+        }
+
+        .chat-title{
+            display:flex;
+            align-items:center;
+            gap:12px;
+        }
+
+        .avatar{
+            width:50px;
+            height:50px;
+            border-radius:50%;
+            background:#25d366;
+            display:flex;
+            justify-content:center;
+            align-items:center;
+            font-size:24px;
+        }
+
+        #chat{
+            flex:1;
+            overflow-y:auto;
+            padding:20px;
+            background:var(--chat);
+        }
+
+        .message{
+            max-width:70%;
+            padding:10px 15px;
+            margin-bottom:12px;
+            border-radius:15px;
+            word-wrap:break-word;
+        }
+
+        .sender{
+            background:var(--mine);
+            color:var(--text);
+            margin-left:auto;
+        }
+
+        .receiver{
+            background:var(--other);
+            color:var(--text);
+        }
+
+        .sender-name{
+            font-size:12px;
+            font-weight:bold;
+            margin-bottom:5px;
+        }
+
+        .time{
+            font-size:11px;
+            opacity:.7;
+            text-align:right;
+            margin-top:5px;
+        }
+
+        .chat-footer{
+            background:var(--header);
+            padding:15px;
+        }
+
+        .btn-send{
+            width:120px;
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+<div class="chat-container">
+
+    <div class="chat-header">
+
+        <div class="chat-title">
+
+            <div class="avatar">
+                💬
+            </div>
+
+            <div>
+                <h5 class="mb-0">ChatSphere</h5>
+                <small>● Online</small>
+            </div>
+
+        </div>
+
+        <button id="themeToggle"
+                class="btn btn-outline-light">
+            🌙
+        </button>
+
+    </div>
+
+    <div id="chat"></div>
+
+    <div class="chat-footer">
+
+        <div class="mb-2">
+            <input id="senderInput"
+                   class="form-control"
+                   placeholder="Enter your name">
+        </div>
+
+        <div class="input-group">
+
+            <input id="messageInput"
+                   class="form-control"
+                   placeholder="Type a message">
+
+            <button id="sendButton"
+                    class="btn btn-success btn-send">
+                Send
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+
+    const chatBox =
+        document.getElementById("chat");
+
+    const senderInput =
+        document.getElementById("senderInput");
+
+    const messageInput =
+        document.getElementById("messageInput");
+
+    const sendButton =
+        document.getElementById("sendButton");
+
+    const themeToggle =
+        document.getElementById("themeToggle");
+
+    let stompClient = null;
+
+    const savedTheme =
+        localStorage.getItem("theme");
+
+    if(savedTheme === "light"){
+        document.body.classList.add("light-mode");
+        themeToggle.textContent = "☀️";
+    }
+
+    themeToggle.addEventListener("click",()=>{
+
+        document.body.classList.toggle("light-mode");
+
+        const isLight =
+            document.body.classList.contains("light-mode");
+
+        themeToggle.textContent =
+            isLight ? "☀️" : "🌙";
+
+        localStorage.setItem(
+            "theme",
+            isLight ? "light" : "dark"
+        );
+    });
+
+    function connect(){
+
+        const socket =
+            new SockJS('/chat');
+
+        stompClient =
+            new StompJs.Client({
+
+                webSocketFactory: () => socket,
+
+                onConnect: () => {
+
+                    stompClient.subscribe(
+                        "/topic/messages",
+
+                        (message) => {
+
+                            const chatMessage =
+                                JSON.parse(message.body);
+
+                            showMessage(
+                                chatMessage.sender,
+                                chatMessage.content
+                            );
+                        }
+                    );
+                }
+            });
+
+        stompClient.activate();
+    }
+
+    function sendMessage(){
+
+        const sender =
+            senderInput.value.trim();
+
+        const content =
+            messageInput.value.trim();
+
+        if(sender === "" || content === ""){
+            return;
+        }
+
+        stompClient.publish({
+
+            destination:
+                "/app/sendMessage",
+
+            body:
+                JSON.stringify({
+                    sender,
+                    content
+                })
+        });
+
+        messageInput.value = "";
+    }
+
+    function showMessage(sender, content){
+
+        const currentUser =
+            senderInput.value.trim();
+
+        const isMine =
+            sender === currentUser;
+
+        const div =
+            document.createElement("div");
+
+        div.className =
+            isMine
+                ? "message sender"
+                : "message receiver";
+
+        const time =
+            new Date()
+                .toLocaleTimeString([],{
+                    hour:"2-digit",
+                    minute:"2-digit"
+                });
+
+        div.innerHTML = `
+            <div class="sender-name">
+                ${sender}
+            </div>
+
+            <div>
+                ${content}
+            </div>
+
+            <div class="time">
+                ${time}
+            </div>
+        `;
+
+        chatBox.appendChild(div);
+
+        chatBox.scrollTop =
+            chatBox.scrollHeight;
+    }
+
+    sendButton.addEventListener(
+        "click",
+        sendMessage
+    );
+
+    messageInput.addEventListener(
+        "keypress",
+        (e)=>{
+
+            if(e.key==="Enter"){
+                sendMessage();
+            }
+        }
+    );
+
+    connect();
+
+</script>
+
+</body>
+</html>
